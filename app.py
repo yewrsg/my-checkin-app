@@ -43,10 +43,27 @@ with tab2:
     search = st.text_input("請輸入姓名搜尋")
     if search:
         df = fetch_data()
-        res = df[df['姓名'].str.contains(search, na=False)]
-        st.write(res[['姓名', '單位', '報到狀態']])
-        if not res.empty:
-            target = st.selectbox("選擇人員", res['電子郵件'].tolist())
-            if st.button("手動報到"):
-                if checkin_user(target):
-                    st.success("報到成功！")
+        if not df.empty:
+            # 優化搜尋：確保「姓名」欄位存在才搜尋，並忽略大小寫
+            if '姓名' in df.columns:
+                res = df[df['姓名'].astype(str).str.contains(search, na=False)]
+                
+                if not res.empty:
+                    # 修改點：自動過濾掉不必要的欄位，只顯示存在的關鍵欄位，避免 KeyError
+                    display_cols = [col for col in ['姓名', '單位', '報到狀態'] if col in res.columns]
+                    st.write(res[display_cols])
+                    
+                    # 下拉選單：確保「電子郵件」欄位存在
+                    if '電子郵件' in res.columns:
+                        target = st.selectbox("選擇人員完成報到", res['電子郵件'].tolist())
+                        if st.button("手動確認報到"):
+                            if checkin_user(target):
+                                st.success(f"{target} 報到成功！")
+                    else:
+                        st.error("試算表中缺少『電子郵件』欄位，無法執行報到。")
+                else:
+                    st.warning("查無此姓名。")
+            else:
+                st.error("試算表標題列找不到『姓名』欄位，請檢查試算表。")
+        else:
+            st.info("目前資料庫中沒有任何報名資料。")

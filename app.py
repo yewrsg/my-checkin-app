@@ -42,28 +42,40 @@ with tab1:
 with tab2:
     search = st.text_input("請輸入姓名搜尋")
     if search:
+        # 每次搜尋都重新抓取最新資料，確保狀態正確
         df = fetch_data()
         if not df.empty:
-            # 優化搜尋：確保「姓名」欄位存在才搜尋，並忽略大小寫
             if '姓名' in df.columns:
+                # 搜尋包含關鍵字的姓名
                 res = df[df['姓名'].astype(str).str.contains(search, na=False)]
                 
                 if not res.empty:
-                    # 修改點：自動過濾掉不必要的欄位，只顯示存在的關鍵欄位，避免 KeyError
-                    display_cols = [col for col in ['姓名', '單位', '報到狀態'] if col in res.columns]
-                    st.write(res[display_cols])
+                    # 強制顯示這四個欄位，讓管理員一眼看出狀態
+                    cols_to_show = ['姓名', '單位', '連絡電話', '報到狀態']
+                    display_cols = [c for c in cols_to_show if c in res.columns]
+                    st.dataframe(res[display_cols], use_container_width=True)
                     
-                    # 下拉選單：確保「電子郵件」欄位存在
-                    if '電子郵件' in res.columns:
-                        target = st.selectbox("選擇人員完成報到", res['電子郵件'].tolist())
-                        if st.button("手動確認報到"):
-                            if checkin_user(target):
-                                st.success(f"{target} 報到成功！")
+                    # 選擇要報到的人員
+                    options = res['電子郵件'].tolist()
+                    target = st.selectbox("選擇人員執行手動報到", options)
+                    
+                    # 取得該員目前狀態
+                    current_status = res[res['電子郵件'] == target]['報到狀態'].values[0]
+                    
+                    if current_status == "✅ 已報到":
+                        st.warning(f"⚠️ {target} 已經完成報到，無需重複操作。")
                     else:
-                        st.error("試算表中缺少『電子郵件』欄位，無法執行報到。")
+                        if st.button("確認手動報到"):
+                            result = requests.post(GAS_URL, json={"email": target}).text
+                            if result == "Success":
+                                st.success(f"✅ {target} 手動報到成功！")
+                                st.balloons()
+                                # 報到成功後建議使用者重新輸入或刷新以更新表格
+                            elif result == "Already Checked In":
+                                st.warning("該員剛才已由他人完成報到。")
+                            else:
+                                st.error("報到失敗，請檢查網路或試算表設定。")
                 else:
-                    st.warning("查無此姓名。")
+                    st.warning("查無此姓名，請檢查字是否有誤。")
             else:
-                st.error("試算表標題列找不到『姓名』欄位，請檢查試算表。")
-        else:
-            st.info("目前資料庫中沒有任何報名資料。")
+                st.error("試算表格式錯誤：找不到『姓名』欄位。")

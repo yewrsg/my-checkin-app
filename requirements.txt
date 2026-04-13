@@ -2,3 +2,4 @@ streamlit
 requests
 pandas
 numpy<2.0
+streamlit-js-eval

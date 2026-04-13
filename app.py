@@ -1,8 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-import cv2
-import numpy as np
+from streamlit_qr_scanner import qr_scanner # 引入即時掃描套件
 
 # --- 基礎設定 ---
 GAS_URL = st.secrets["GAS_URL"]
@@ -24,7 +23,6 @@ def fetch_data():
 def checkin_user(rid):
     with st.spinner('同步中...'):
         try:
-            # 傳送 ID 給 GAS
             response = requests.post(GAS_URL, json={"id": rid})
             return response.text
         except Exception as e:
@@ -35,6 +33,7 @@ df_all = fetch_data()
 
 st.title("📲 研習行動報到站")
 
+# 顯示進度條
 if not df_all.empty:
     total = len(df_all)
     status_col = '報到狀態' if '報到狀態' in df_all.columns else None
@@ -45,49 +44,52 @@ if not df_all.empty:
 
 st.divider()
 
-tab1, tab2, tab3 = st.tabs(["📷 QR 掃描", "🔍 手動搜尋", "📋 名單預覽"])
+tab1, tab2, tab3 = st.tabs(["📷 自動掃描", "🔍 手動搜尋", "📋 名單預覽"])
 
-# -- Tab 1: QR 掃描 --
+# -- Tab 1: 即時自動掃描 --
 with tab1:
-    # 針對 iPad/行動裝置的提示
-    st.info("💡 iPad 使用者：若未自動切換鏡頭，請點擊畫面下方『切換相機』圖示，並確保在 Safari 瀏覽器中執行。")
-    img = st.camera_input("請對準 QR Code 拍照")
+    st.subheader("請將 QR Code 對準鏡頭")
     
-    if img:
-        bytes_data = img.getvalue()
-        cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-        detector = cv2.QRCodeDetector()
-        scanned_id, _, _ = detector.detectAndDecode(cv_img)
+    # 使用即時掃描元件，不必點擊拍照按鈕
+    scanned_id = qr_scanner(key="qr_scanner")
+    
+    # 當偵測到 QR Code 內容時
+    if scanned_id:
+        st.info(f"掃描結果：{scanned_id}")
         
-        if scanned_id:
-            id_col = '隨機ID' if '隨機ID' in df_all.columns else None
-            if id_col:
-                user = df_all[df_all[id_col] == scanned_id]
-                if not user.empty:
-                    name_val = user.iloc[0]['姓名']
-                    st.success(f"📍 找到對象：{name_val} ({scanned_id})")
-                    
-                    # 檢查報到狀態
-                    if status_col and user.iloc[0][status_col] == "✅ 已報到":
-                        st.warning("⚠️ 提醒：此人員已完成報到。")
-                    else:
-                        if st.button("確認報到", type="primary", key="qr_confirm"):
-                            res = checkin_user(scanned_id)
-                            if res == "Success":
-                                st.balloons()
-                                st.toast(f"{name_val} 報到成功！")
-                                st.cache_data.clear()
-                                st.rerun()
+        id_col = '隨機ID' if '隨機ID' in df_all.columns else None
+        if id_col:
+            user = df_all[df_all[id_col] == scanned_id]
+            if not user.empty:
+                name_val = user.iloc[0]['姓名']
+                st.success(f"📍 找到對象：{name_val}")
+                
+                # 檢查報到狀態
+                if status_col and user.iloc[0][status_col] == "✅ 已報到":
+                    st.warning("⚠️ 提醒：此人員已完成報到。")
+                    if st.button("掃描下一個人"):
+                        st.rerun()
                 else:
-                    st.error(f"無效的掃描內容：{scanned_id}")
+                    # 為了保險起見，我們保留一個確認按鈕，
+                    # 避免鏡頭晃過某人名牌就「誤報到」。
+                    # 若您希望連點都不必點，可以直接執行 checkin_user 並 rerun。
+                    if st.button(f"確認【{name_val}】報到", type="primary"):
+                        res = checkin_user(scanned_id)
+                        if res == "Success":
+                            st.balloons()
+                            st.success(f"{name_val} 報到成功！")
+                            st.cache_data.clear()
+                            # 延遲一下讓使用者看見成功訊息，或直接重新整理
+                            st.rerun()
             else:
-                st.error("試算表中缺少『隨機ID』欄位。")
+                st.error(f"資料庫查無此 ID：{scanned_id}")
+                if st.button("重試"):
+                    st.rerun()
 
-# -- Tab 2: 手動搜尋 --
+# -- Tab 2: 手動搜尋 (保持不變) --
 with tab2:
     search = st.text_input("輸入關鍵字搜尋 (姓名/單位/電話)")
     if search and not df_all.empty:
-        # 全欄過濾
         res = df_all[df_all.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
         if not res.empty:
             display_cols = [c for c in ['姓名', '單位', '報到狀態', '隨機ID'] if c in res.columns]
@@ -104,7 +106,7 @@ with tab2:
         else:
             st.warning("查無相關資料。")
 
-# -- Tab 3: 名單預覽 --
+# -- Tab 3: 名單預覽 (保持不變) --
 with tab3:
     st.subheader("📋 完整名單預覽")
     if not df_all.empty:

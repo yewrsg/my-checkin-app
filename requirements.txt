@@ -3,3 +3,4 @@ requests
 pandas
 opencv-python-headless
 numpy
+streamlit-qr-scanner

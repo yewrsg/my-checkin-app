@@ -4,78 +4,84 @@ import pandas as pd
 import cv2
 import numpy as np
 
-# 這裡建議使用 Secrets 存網址，但我們先直接寫入測試
+# 從 Secrets 讀取網址
 GAS_URL = st.secrets["GAS_URL"]
 
-st.set_page_config(page_title="研習報到站", layout="centered")
+st.set_page_config(page_title="研習報到站 2.0", page_icon="✅", layout="centered")
 
+# --- 1. 優化：加入快取機制減少 GAS 負擔 ---
+@st.cache_data(ttl=20) # 資料每 20 秒自動更新一次
 def fetch_data():
-    return pd.DataFrame(requests.get(GAS_URL).json())
+    try:
+        response = requests.get(GAS_URL)
+        return pd.DataFrame(response.json())
+    except Exception as e:
+        st.error(f"連線失敗: {e}")
+        return pd.DataFrame()
 
 def checkin_user(email):
-    return requests.post(GAS_URL, json={"email": email}).text == "Success"
+    with st.spinner('同步資料庫中...'):
+        response = requests.post(GAS_URL, json={"email": email})
+        return response.text
 
-st.title("📲 研習自動報到系統")
+# --- 2. UI 界面美化：上方進度條 ---
+df_all = fetch_data()
+if not df_all.empty:
+    total = len(df_all)
+    checked = len(df_all[df_all['報到狀態'] == "✅ 已報到"])
+    percent = int((checked / total) * 100)
+    
+    st.title("📲 研習行動報到站")
+    st.progress(checked / total)
+    st.caption(f"📊 目前進度：{checked} / {total} 人 (已完成 {percent}%)")
+    st.divider()
 
-tab1, tab2 = st.tabs(["📷 掃描報到", "🔍 手動搜尋"])
+# 分頁切換
+tab1, tab2, tab3 = st.tabs(["📷 QR 掃描", "🔍 手動搜尋", "📋 全員清單"])
 
 with tab1:
-    img = st.camera_input("請對準 QR Code")
+    img = st.camera_input("請拍下 QR Code")
     if img:
+        # QR Code 辨識邏輯保持不變...
         bytes_data = img.getvalue()
         cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         detector = cv2.QRCodeDetector()
         email, _, _ = detector.detectAndDecode(cv_img)
         
         if email:
-            df = fetch_data()
-            user = df[df['電子郵件'] == email]
+            user = df_all[df_all['電子郵件'] == email]
             if not user.empty:
-                st.success(f"找到參加者：{user.iloc[0]['姓名']}")
-                if st.button("確認報到"):
-                    if checkin_user(email):
-                        st.balloons()
-                        st.success("報到成功！")
+                st.success(f"📍 找到對象：{user.iloc[0]['姓名']}")
+                if user.iloc[0]['報到狀態'] == "✅ 已報到":
+                    st.warning("此人員已於先前完成報到。")
+                elif st.button("確認報到", type="primary"):
+                    res = checkin_user(email)
+                    if res == "Success":
+                        st.toast(f"{email} 報到成功！", icon='🎉')
+                        st.cache_data.clear() # 報到成功後強制清除快取
+                        st.rerun()
             else:
-                st.error("查無此資料")
+                st.error("查無此 Email，請確認 QR Code 內容。")
 
 with tab2:
-    search = st.text_input("請輸入姓名搜尋")
+    search = st.text_input("輸入關鍵字搜尋 (姓名/單位/電話)")
     if search:
-        # 每次搜尋都重新抓取最新資料，確保狀態正確
-        df = fetch_data()
-        if not df.empty:
-            if '姓名' in df.columns:
-                # 搜尋包含關鍵字的姓名
-                res = df[df['姓名'].astype(str).str.contains(search, na=False)]
-                
-                if not res.empty:
-                    # 強制顯示這四個欄位，讓管理員一眼看出狀態
-                    cols_to_show = ['姓名', '單位', '連絡電話', '報到狀態']
-                    display_cols = [c for c in cols_to_show if c in res.columns]
-                    st.dataframe(res[display_cols], use_container_width=True)
-                    
-                    # 選擇要報到的人員
-                    options = res['電子郵件'].tolist()
-                    target = st.selectbox("選擇人員執行手動報到", options)
-                    
-                    # 取得該員目前狀態
-                    current_status = res[res['電子郵件'] == target]['報到狀態'].values[0]
-                    
-                    if current_status == "✅ 已報到":
-                        st.warning(f"⚠️ {target} 已經完成報到，無需重複操作。")
-                    else:
-                        if st.button("確認手動報到"):
-                            result = requests.post(GAS_URL, json={"email": target}).text
-                            if result == "Success":
-                                st.success(f"✅ {target} 手動報到成功！")
-                                st.balloons()
-                                # 報到成功後建議使用者重新輸入或刷新以更新表格
-                            elif result == "Already Checked In":
-                                st.warning("該員剛才已由他人完成報到。")
-                            else:
-                                st.error("報到失敗，請檢查網路或試算表設定。")
-                else:
-                    st.warning("查無此姓名，請檢查字是否有誤。")
-            else:
-                st.error("試算表格式錯誤：找不到『姓名』欄位。")
+        # 全欄位關鍵字搜尋
+        res = df_all[df_all.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+        
+        if not res.empty:
+            st.dataframe(res[['姓名', '單位', '報到狀態', '連絡電話']], use_container_width=True)
+            target = st.selectbox("請選擇報到對象", res['電子郵件'].tolist())
+            
+            if st.button("手動報到", key="manual_btn"):
+                res_status = checkin_user(target)
+                if res_status == "Success":
+                    st.success(f"{target} 報到成功！")
+                    st.cache_data.clear()
+                    st.rerun()
+        else:
+            st.warning("查無相關資料")
+
+with tab3:
+    st.subheader("完整名單預覽")
+    st.dataframe(df_all[['姓名', '單位', '報到狀態']], use_container_width=True)

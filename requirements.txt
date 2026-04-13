@@ -1,6 +1,4 @@
 streamlit
 requests
 pandas
-opencv-python-headless
-numpy
-streamlit-qr-scanner
+numpy<2.0

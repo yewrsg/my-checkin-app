@@ -66,10 +66,49 @@ with tab1:
             else:
                 st.warning("⚠️ 無法偵測 QR Code。請將鏡頭對準、光線充足並重新拍攝。")
 
-# --- Tab 2 & 3 保留您原本正確的功能 ---
+# --- Tab 2: 手動報到 (解決空白頁面，改用原生 UI) ---
 with tab2:
-    # ... 您原有的手動報到代碼 ...
-    pass
+    st.subheader("🔍 搜尋學員並報到")
+    
+    # 1. 利用使用者資料搜尋
+    search_query = st.text_input("輸入姓名、單位或關鍵字進行搜尋", placeholder="例如：王小明")
+    
+    if not df_all.empty:
+        # 過濾資料 (假設欄位名稱為 '姓名'，請依實際情況調整)
+        # 我們讓搜尋範圍包含所有欄位，增加彈性
+        mask = df_all.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
+        filtered_df = df_all[mask]
+        
+        if search_query:
+            st.write(f"找到 {len(filtered_df)} 筆結果：")
+            
+            for index, row in filtered_df.iterrows():
+                # 顯示簡單的資訊卡片
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    # 顯示姓名、單位與目前狀態
+                    status_icon = "✅" if row.get("報到狀態") == "已報到" else "❌"
+                    st.write(f"{status_icon} **{row.get('姓名', '未知')}** ({row.get('單位', '無單位')})")
+                
+                with col2:
+                    # 2. 點選搜尋者資料 & 3. 完成手動報到
+                    if row.get("報到狀態") != "已報到":
+                        if st.button(f"按此報到", key=f"btn_{row.get('隨機ID')}"):
+                            with st.spinner("報到中..."):
+                                res = requests.post(GAS_URL, json={"id": str(row.get("隨機ID"))})
+                                if res.text == "Success":
+                                    st.toast(f"✅ {row.get('姓名')} 報到成功！")
+                                    st.cache_data.clear() # 清除快取，下次更新名單
+                                    st.rerun() # 重新整理畫面
+                                else:
+                                    st.error("報到失敗，請稍後再試")
+                    else:
+                        st.write("已完成")
+                st.divider()
+        else:
+            st.info("請在上方輸入關鍵字開始搜尋。")
+    else:
+        st.warning("目前名單為空，請確認 GAS 連結是否正確。")
 
 with tab3:
     if not df_all.empty:

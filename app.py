@@ -1,68 +1,50 @@
 import streamlit as st
 import requests
 import pandas as pd
+import cv2
+import numpy as np
 
-# --- 1. 設定與金鑰讀取 ---
-# 確保 Streamlit Cloud Secrets 中有名稱為 GAS_URL 的設定
+# --- 1. 基礎設定 ---
 GAS_URL = st.secrets.get("GAS_URL", "")
 
-st.set_page_config(page_title="研習報到系統", page_icon="📝", layout="centered")
+# --- 2. 掃描解碼邏輯 ---
+def decode_qr(image):
+    # 將上傳的照片轉換為 OpenCV 格式
+    file_bytes = np.asarray(bytearray(image.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, 1)
+    
+    # 初始化 QR Code 偵測器
+    detector = cv2.QRCodeDetector()
+    data, bbox, _ = detector.detectAndDecode(img)
+    return data
 
-# --- 2. 資料獲取函式 ---
-@st.cache_data(ttl=5)
-def fetch_data():
-    if not GAS_URL:
-        return pd.DataFrame()
-    try:
-        # 加上 action=getData 參數觸發 GAS 回傳 JSON
-        res = requests.get(f"{GAS_URL}?action=getData")
-        if res.status_code == 200:
-            df = pd.DataFrame(res.json()).astype(str)
-            df.columns = df.columns.str.strip() # 清除欄位標頭空格
-            return df
-        return pd.DataFrame()
-    except:
-        return pd.DataFrame()
+# --- 3. UI 介面 ---
+st.title("📲 研習行動報到站 (原生版)")
+df_all = fetch_data() # 您原本抓取名單的函式
 
-# --- 3. UI 主介面 ---
-st.title("📲 研習行動報到站")
-df_all = fetch_data()
+tab1, tab2, tab3 = st.tabs(["📷 拍照報到", "🔍 手動報到", "📋 名單預覽"])
 
-# 分頁標籤
-tab1, tab2, tab3 = st.tabs(["📷 掃描報到", "🔍 手動報到", "📋 名單預覽"])
-
-# --- Tab 1: 掃描報到 (跳脫框架解決方案) ---
 with tab1:
-    st.subheader("📷 行動掃描報到")
+    st.subheader("使用相機拍照報到")
     
-    # 強力提醒
-    st.warning("⚠️ 由於瀏覽器安全限制，嵌入式掃描器無法啟動相機。")
-    st.info("請點擊下方按鈕開啟「全螢幕掃描器」，掃描成功後關閉該視窗即可回到此處。")
-    
-    # 建立醒目的連結按鈕
-    # target="_blank" 是關鍵，確保在獨立分頁開啟以獲取相機權限
-    st.markdown(f"""
-        <a href="{GAS_URL}" target="_blank" style="text-decoration: none;">
-            <div style="
-                background-color: #28a745;
-                color: white;
-                padding: 20px;
-                text-align: center;
-                border-radius: 12px;
-                font-size: 22px;
-                font-weight: bold;
-                margin: 20px 0;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-                cursor: pointer;
-            ">
-                🚀 啟動全螢幕掃描鏡頭
-            </div>
-        </a>
-    """, unsafe_allow_html=True)
+    # 使用 Streamlit 原生相機元件
+    img_file = st.camera_input("請將 QR Code 對準鏡頭並拍照")
 
-    # 備註說明
-    with st.expander("為什麼需要點擊按鈕？"):
-        st.write("現代瀏覽器 (Chrome/Safari) 為了保護隱私，禁止在嵌入式網頁 (Iframe) 中調用鏡頭。透過新分頁開啟可以獲得完整的系統授權。")
+    if img_file:
+        with st.spinner("正在辨識 QR Code..."):
+            qr_data = decode_qr(img_file)
+            
+            if qr_data:
+                st.success(f"辨識成功：ID {qr_data}")
+                # 呼叫原本的 GAS 報到 API
+                res = requests.post(GAS_URL, json={"id": qr_data})
+                if res.text == "Success":
+                    st.balloons()
+                    st.success("✅ 報到完成！")
+                else:
+                    st.error(f"報到失敗：{res.text}")
+            else:
+                st.warning("無法辨識 QR Code，請靠近一點重新拍攝。")
 
 # -- Tab 2: 手動報到 (您提到功能正確) --
 with tab2:

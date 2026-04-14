@@ -9,13 +9,20 @@ GAS_URL = st.secrets.get("GAS_URL", "")
 
 # --- 2. 掃描解碼邏輯 ---
 def decode_qr(image):
-    # 將上傳的照片轉換為 OpenCV 格式
     file_bytes = np.asarray(bytearray(image.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
     
-    # 初始化 QR Code 偵測器
+    # 初始化偵測器
     detector = cv2.QRCodeDetector()
-    data, bbox, _ = detector.detectAndDecode(img)
+    
+    # 嘗試辨識
+    data, bbox, straight_qrcode = detector.detectAndDecode(img)
+    
+    # 如果一般的辨識失敗，可以嘗試將圖片轉為灰階提高對比
+    if not data:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        data, bbox, _ = detector.detectAndDecode(gray)
+        
     return data
 
 # --- 3. UI 介面 ---

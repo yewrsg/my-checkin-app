@@ -2,60 +2,63 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# --- 1. 基礎設定 ---
-# 請確保 Streamlit Cloud 的 Secrets 中已設定 GAS_URL
+# --- 1. 設定與金鑰讀取 ---
+# 確保 Streamlit Cloud Secrets 中有名稱為 GAS_URL 的設定
 GAS_URL = st.secrets.get("GAS_URL", "")
-st.set_page_config(page_title="研習報到站", page_icon="📝", layout="centered")
 
-# --- 2. 資料獲取 (從 GAS API 抓取 JSON) ---
+st.set_page_config(page_title="研習報到系統", page_icon="📝", layout="centered")
+
+# --- 2. 資料獲取函式 ---
 @st.cache_data(ttl=5)
-def get_roster():
-    if not GAS_URL: return pd.DataFrame()
+def fetch_data():
+    if not GAS_URL:
+        return pd.DataFrame()
     try:
-        # 加上 ?action=getData 參數來觸發 GAS 回傳 JSON
+        # 加上 action=getData 參數觸發 GAS 回傳 JSON
         res = requests.get(f"{GAS_URL}?action=getData")
         if res.status_code == 200:
             df = pd.DataFrame(res.json()).astype(str)
-            df.columns = df.columns.str.strip() # 清理欄位標題空格
+            df.columns = df.columns.str.strip() # 清除欄位標頭空格
             return df
         return pd.DataFrame()
-    except Exception as e:
-        st.error(f"連線失敗：{e}")
+    except:
         return pd.DataFrame()
 
-# --- 3. UI 介面 ---
+# --- 3. UI 主介面 ---
 st.title("📲 研習行動報到站")
-df_all = get_roster()
+df_all = fetch_data()
 
+# 分頁標籤
 tab1, tab2, tab3 = st.tabs(["📷 掃描報到", "🔍 手動報到", "📋 名單預覽"])
 
-# -- Tab 1: 嵌入 GAS 掃描網頁 (解決相機權限報錯) --
-# --- 在 Tab 1 替換成這段代碼 ---
+# -- Tab 1: 掃描報到 (修正後的嵌入方式) --
 with tab1:
-    st.info("💡 提示：若手機彈出相機權限視窗，請務必點選「允許」。")
-    
-    # 這裡我們不使用 st.components.v1.iframe
-    # 改用 st.components.v1.html 手寫 HTML 標籤
-    iframe_code = f"""
-        <iframe 
-            src="{GAS_URL}" 
-            width="100%" 
-            height="550" 
-            style="border:none;" 
-            allow="camera; microphone"
-        ></iframe>
-    """
-    
-    # 執行嵌入
-    st.components.v1.html(iframe_code, height=560)
+    if not GAS_URL:
+        st.error("❌ 錯誤：請先在 Streamlit Cloud Secrets 中設定 GAS_URL")
+    else:
+        st.info("💡 提示：請使用手機瀏覽器 (Safari/Chrome) 開啟，並在跳出權限請求時點選「允許」。")
+        
+        # 【核心修正】：手寫 HTML 標籤來避開 Streamlit 的參數限制
+        # 這樣寫瀏覽器才能讀到 allow="camera"
+        iframe_html = f"""
+            <iframe 
+                src="{GAS_URL}" 
+                width="100%" 
+                height="600px" 
+                style="border: 2px solid #eeeeee; border-radius: 10px;" 
+                allow="camera; microphone; display-capture; autoplay"
+            ></iframe>
+        """
+        
+        # 使用 html 函式嵌入，不再使用 st.components.v1.iframe
+        st.components.v1.html(iframe_html, height=620)
 
-# -- Tab 2: 手動報到 --
+# -- Tab 2: 手動報到 (您提到功能正確) --
 with tab2:
-    st.subheader("🔍 搜尋姓名報到")
-    search_q = st.text_input("請輸入姓名或關鍵字")
+    st.subheader("🔍 手動搜尋報到")
+    search_q = st.text_input("請輸入姓名關鍵字")
     
     if search_q and not df_all.empty:
-        # 過濾包含關鍵字的資料
         mask = df_all.apply(lambda r: r.str.contains(search_q, case=False).any(), axis=1)
         res = df_all[mask]
         
@@ -63,37 +66,32 @@ with tab2:
             options = []
             id_map = {}
             for _, row in res.iterrows():
-                # 建立易讀的標籤，自動適應欄位名稱
-                name_val = row.get('姓名', '未知')
-                unit_val = row.get('單位', '--')
-                status_val = row.get('報到狀態', '')
+                # 自動抓取欄位，若名稱不符則顯示 ID
+                name = row.get('姓名', '未知')
                 id_val = row.get('隨機ID', '')
-                
-                label = f"{name_val} | {unit_val} | {status_val}"
+                label = f"{name} | {row.get('單位','--')} | {row.get('報到狀態','')}"
                 options.append(label)
-                id_map[label] = (id_val, name_val)
+                id_map[label] = (id_val, name)
             
-            selected = st.selectbox("請選擇人員：", options)
-            if st.button("執行手動報到", type="primary"):
+            selected = st.selectbox("請選擇報到對象：", options)
+            if st.button("確認報到", type="primary"):
                 tid, tname = id_map[selected]
-                with st.spinner("同步至試算表中..."):
-                    # POST 到 GAS 執行報到邏輯
+                with st.spinner("更新中..."):
                     post_res = requests.post(GAS_URL, json={"id": tid})
                     if post_res.text == "Success":
-                        st.success(f"✅ {tname} 手動報到成功！")
-                        st.cache_data.clear() # 清除快取以刷新名單
-                        st.rerun()
+                        st.success(f"✅ {tname} 報到成功！")
+                        st.cache_data.clear() # 重新抓取資料
                     else:
                         st.warning(f"結果：{post_res.text}")
         else:
-            st.warning("查無相關資料。")
+            st.warning("查無此人。")
 
 # -- Tab 3: 名單預覽 --
 with tab3:
     if not df_all.empty:
-        # 只顯示關鍵欄位
-        display_cols = [c for c in ['姓名', '單位', '報到狀態', '隨機ID'] if c in df_all.columns]
-        st.dataframe(df_all[display_cols], width="stretch")
-        if st.button("🔄 重新整理資料"):
+        # 過濾顯示欄位
+        show_cols = [c for c in ['姓名', '單位', '報到狀態', '隨機ID'] if c in df_all.columns]
+        st.dataframe(df_all[show_cols], width="stretch")
+        if st.button("🔄 刷新名單"):
             st.cache_data.clear()
             st.rerun()

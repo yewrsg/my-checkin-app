@@ -30,12 +30,13 @@ df_all = get_roster()
 tab1, tab2, tab3 = st.tabs(["📷 掃描報到", "🔍 手動報到", "📋 名單預覽"])
 
 # -- Tab 1: 嵌入 GAS 掃描網頁 (解決相機權限報錯) --
+# --- 在 Tab 1 替換成這段代碼 ---
 with tab1:
-    st.info("💡 提示：若手機彈出權限視窗，請務必點選「允許」以開啟相機。")
+    st.info("💡 提示：若手機彈出相機權限視窗，請務必點選「允許」。")
     
-    # 【關鍵修正】：因為 st.iframe 不支援 allow 參數，我們手動寫 HTML 標籤
-    # 加入 allow="camera; microphone" 確保瀏覽器授權相機
-    iframe_html = f"""
+    # 這裡我們不使用 st.components.v1.iframe
+    # 改用 st.components.v1.html 手寫 HTML 標籤
+    iframe_code = f"""
         <iframe 
             src="{GAS_URL}" 
             width="100%" 
@@ -45,8 +46,8 @@ with tab1:
         ></iframe>
     """
     
-    # 使用 st.components.v1.html 來嵌入這段自定義的 iframe
-    st.components.v1.html(iframe_html, height=560)
+    # 執行嵌入
+    st.components.v1.html(iframe_code, height=560)
 
 # -- Tab 2: 手動報到 --
 with tab2:

@@ -31,21 +31,40 @@ df_all = fetch_data()
 # 分頁標籤
 tab1, tab2, tab3 = st.tabs(["📷 掃描報到", "🔍 手動報到", "📋 名單預覽"])
 
-# -- Tab 1: 掃描報到 (修正後的嵌入方式) --
+# --- Tab 1: 掃描報到 (終極解決方案：跳脫框架) ---
 with tab1:
-    st.info("💡 提示：若未彈出權限請求，請確認網址列左側的『鎖頭』圖示是否已開啟相機權限。")
+    st.subheader("📷 行動掃描報到")
     
-    # 關鍵修正：加入 camera * 確保跨網域授權
-    iframe_html = f"""
-        <iframe 
-            src="{GAS_URL}" 
-            width="100%" 
-            height="600px" 
-            style="border:none; border-radius:10px;" 
-            allow="camera *; microphone *; autoplay; display-capture; fullscreen"
-        ></iframe>
-    """
-    st.components.v1.html(iframe_html, height=620)
+    # 說明文字
+    st.warning("由於瀏覽器安全限制，請點擊下方按鈕開啟專屬掃描視窗。")
+    
+    # 建立一個醒目的連結按鈕
+    # 利用 markdown 語法做出像按鈕的樣式
+    st.markdown(f"""
+        <a href="{GAS_URL}" target="_blank" style="text-decoration: none;">
+            <div style="
+                background-color: #28a745;
+                color: white;
+                padding: 15px;
+                text-align: center;
+                border-radius: 10px;
+                font-size: 20px;
+                font-weight: bold;
+                margin: 20px 0;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            ">
+                🚀 點我開啟相機掃描器
+            </div>
+        </a>
+    """, unsafe_allow_html=True)
+    
+    st.info("💡 掃描成功後，您可以直接關閉掃描視窗，回到此處查看報到進度。")
+    
+    # 保留一個備用的嵌入視窗 (萬一某些瀏覽器支援)
+    with st.expander("若您的手機支援，也可嘗試直接在此掃描"):
+        iframe_html = f'<iframe src="{GAS_URL}" width="100%" height="500" allow="camera; microphone; camera *;" style="border:none;"></iframe>'
+        st.components.v1.html(iframe_html, height=520)
+
 
 # -- Tab 2: 手動報到 (您提到功能正確) --
 with tab2:

@@ -5,9 +5,8 @@ import cv2
 import numpy as np
 
 # --- 1. 基礎設定與安全性設定 ---
-# 請在 Streamlit Cloud 的 Secrets 中設定 GAS_URL 與 ADMIN_KEY
-GAS_URL = st.secrets["GAS_URL"]
-ADMIN_KEY = st.secrets["ADMIN_KEY"] # 設定在 Secrets 中
+GAS_URL = st.secrets.get("GAS_URL", "")
+ADMIN_KEY = st.secrets["ADMIN_KEY"]
 
 st.set_page_config(page_title="研習報到系統", page_icon="📝")
 
@@ -31,23 +30,22 @@ with st.sidebar:
 def fetch_data():
     if not GAS_URL: return pd.DataFrame()
     try:
-        res = requests.get(f"{GAS_URL}?action=getData")
-        return pd.DataFrame(res.json()) if res.status_code == 200 else pd.DataFrame()
-    except:
+        # 💡 確保 GET 請求包含 action 參數
+        res = requests.get(f"{GAS_URL}?action=getData", timeout=10)
+        if res.status_code == 200:
+            return pd.DataFrame(res.json())
+        else:
+            return pd.DataFrame()
+    except Exception as e:
+        # 如果失敗，在開發環境可印出 e 方便偵錯
         return pd.DataFrame()
 
 # --- 3. QR Code 辨識邏輯 ---
 def decode_qr(image_file):
-    # 將上傳的照片轉換為 OpenCV 格式
     file_bytes = np.asarray(bytearray(image_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    
-    # 初始化辨識器
     detector = cv2.QRCodeDetector()
-    # 嘗試偵測並解碼
     data, bbox, _ = detector.detectAndDecode(img)
-    
-    # 如果失敗，嘗試轉灰階增加辨識率
     if not data:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         data, _, _ = detector.detectAndDecode(gray)
@@ -59,58 +57,49 @@ df_all = fetch_data()
 
 tab1, tab2, tab3 = st.tabs(["📷 拍照報到", "🔍 手動報到", "📋 名單預覽"])
 
-# --- Tab 1: 拍照報到 (受權限保護) ---
 with tab1:
     st.subheader("請對準 QR Code 拍照")
-    
     if is_authorized:
-        # 只有授權用戶可以看到相機元件
         captured_img = st.camera_input("拍照後系統會自動辨識")
-
         if captured_img:
             with st.spinner("辨識中..."):
                 qr_data = decode_qr(captured_img)
-                
                 if qr_data:
                     st.success(f"辨識成功：ID {qr_data}")
-                    # 送出報到請求到 GAS，必須加入 key 授權碼
                     try:
                         res = requests.post(GAS_URL, json={
                             "id": qr_data,
-                            "key": input_key  # 💡 修正：傳送授權碼給 GAS 驗證
+                            "key": input_key
                         })
                         if res.text == "Success":
                             st.balloons()
                             st.success("✅ 報到成功！")
-                            st.cache_data.clear() # 清除快取以刷新名單
+                            st.cache_data.clear()
                         else:
                             st.error(f"報到失敗：{res.text}")
                     except Exception as e:
                         st.error(f"連線至 GAS 出錯：{e}")
                 else:
-                    st.warning("⚠️ 無法偵測 QR Code。請將鏡頭對準、光線充足並重新拍攝。")
+                    st.warning("⚠️ 無法偵測 QR Code。")
     else:
-        st.warning("🔒 此功能僅限授權管理員使用，請於側邊欄輸入正確的授權碼。")
+        st.warning("🔒 此功能僅限授權管理員使用。")
 
-# --- Tab 2: 手動報到 (受權限保護) ---
 with tab2:
     st.subheader("🔍 搜尋學員並報到")
-    
     if is_authorized:
-        # 1. 利用使用者資料搜尋
         search_query = st.text_input("輸入姓名、單位或關鍵字進行搜尋", placeholder="例如：王小明")
         
         if not df_all.empty:
+            # 💡 確保搜尋範圍包含所有字串化後的資料
             mask = df_all.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
             filtered_df = df_all[mask]
             
             if search_query:
                 st.write(f"找到 {len(filtered_df)} 筆結果：")
-                
                 for index, row in filtered_df.iterrows():
                     col1, col2 = st.columns([3, 1])
                     
-                    # 💡 修正：正確抓取 "UID" 欄位，若沒有則預設為空字串
+                    # 💡 注意：請確認 Google 試算表第一列的標題文字確實是 "UID"
                     user_uid = str(row.get("UID", ""))
                     
                     with col1:
@@ -119,10 +108,8 @@ with tab2:
                     
                     with col2:
                         if row.get("報到狀態") != "已報到":
-                            # 💡 修正：在 button 的 key 加入 index，絕對防止 StreamlitDuplicateElementKey 錯誤
                             if st.button(f"按此報到", key=f"btn_{user_uid}_{index}"):
                                 with st.spinner("報到中..."):
-                                    # 💡 修正：送出請求時加入 key 授權碼
                                     res = requests.post(GAS_URL, json={
                                         "id": user_uid,
                                         "key": input_key
@@ -132,7 +119,6 @@ with tab2:
                                         st.cache_data.clear()
                                         st.rerun()
                                     else:
-                                        # 顯示來自 GAS 的詳細錯誤訊息以利除錯
                                         st.error(f"報到失敗：{res.text}")
                         else:
                             st.write("已完成")
@@ -140,11 +126,10 @@ with tab2:
             else:
                 st.info("請在上方輸入關鍵字開始搜尋。")
         else:
-            st.warning("目前名單為空，請確認 GAS 連結是否正確。")
+            st.warning("目前名單為空，請確認 GAS 連結是否正確，並確保試算表中有資料且已發佈為網路應用程式。")
     else:
-        st.warning("🔒 此功能僅限授權管理員使用，請於側邊欄輸入正確的授權碼。")
+        st.warning("🔒 此功能僅限授權管理員使用。")
 
-# --- Tab 3: 名單預覽 (開放查看) ---
 with tab3:
     st.subheader("📋 目前報到清單")
     if not df_all.empty:

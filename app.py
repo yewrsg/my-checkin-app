@@ -6,7 +6,7 @@ import numpy as np
 
 # --- 1. 基礎設定與安全性設定 ---
 # 請在 Streamlit Cloud 的 Secrets 中設定 GAS_URL 與 ADMIN_KEY
-GAS_URL = st.secrets.get["GAS_URL"]
+GAS_URL = st.secrets["GAS_URL"]
 ADMIN_KEY = st.secrets["ADMIN_KEY"] # 設定在 Secrets 中
 
 st.set_page_config(page_title="研習報到系統", page_icon="📝")

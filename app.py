@@ -73,9 +73,12 @@ with tab1:
                 
                 if qr_data:
                     st.success(f"辨識成功：ID {qr_data}")
-                    # 送出報到請求到 GAS
+                    # 送出報到請求到 GAS，必須加入 key 授權碼
                     try:
-                        res = requests.post(GAS_URL, json={"id": qr_data})
+                        res = requests.post(GAS_URL, json={
+                            "id": qr_data,
+                            "key": input_key  # 💡 修正：傳送授權碼給 GAS 驗證
+                        })
                         if res.text == "Success":
                             st.balloons()
                             st.success("✅ 報到成功！")
@@ -106,21 +109,31 @@ with tab2:
                 
                 for index, row in filtered_df.iterrows():
                     col1, col2 = st.columns([3, 1])
+                    
+                    # 💡 修正：正確抓取 "UID" 欄位，若沒有則預設為空字串
+                    user_uid = str(row.get("UID", ""))
+                    
                     with col1:
                         status_icon = "✅" if row.get("報到狀態") == "已報到" else "❌"
                         st.write(f"{status_icon} **{row.get('姓名', '未知')}** ({row.get('單位', '無單位')})")
                     
                     with col2:
                         if row.get("報到狀態") != "已報到":
-                            if st.button(f"按此報到", key=f"btn_{row.get('隨機ID')}"):
+                            # 💡 修正：在 button 的 key 加入 index，絕對防止 StreamlitDuplicateElementKey 錯誤
+                            if st.button(f"按此報到", key=f"btn_{user_uid}_{index}"):
                                 with st.spinner("報到中..."):
-                                    res = requests.post(GAS_URL, json={"id": str(row.get("隨機ID"))})
+                                    # 💡 修正：送出請求時加入 key 授權碼
+                                    res = requests.post(GAS_URL, json={
+                                        "id": user_uid,
+                                        "key": input_key
+                                    })
                                     if res.text == "Success":
                                         st.toast(f"✅ {row.get('姓名')} 報到成功！")
                                         st.cache_data.clear()
                                         st.rerun()
                                     else:
-                                        st.error("報到失敗，請稍後再試")
+                                        # 顯示來自 GAS 的詳細錯誤訊息以利除錯
+                                        st.error(f"報到失敗：{res.text}")
                         else:
                             st.write("已完成")
                     st.divider()

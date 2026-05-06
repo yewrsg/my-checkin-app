@@ -24,17 +24,15 @@ with st.sidebar:
         st.info("請輸入授權碼以啟用報到功能")
 
 # --- 2. 資料獲取 ---
-@st.cache_data(ttl=5) # 縮短快取時間，加速重新讀取
+@st.cache_data(ttl=5)
 def fetch_data():
     if not GAS_URL: return pd.DataFrame()
     try:
-        # 強制加入 action=getData 參數
         res = requests.get(f"{GAS_URL}?action=getData", timeout=15)
         if res.status_code == 200:
-            data = res.json()
-            return pd.DataFrame(data)
+            return pd.DataFrame(res.json())
         return pd.DataFrame()
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 # --- 3. QR Code 辨識 ---
@@ -62,14 +60,14 @@ with tab1:
             with st.spinner("辨識中..."):
                 qr_data = decode_qr(captured_img)
                 if qr_data:
-                    st.info(f"辨識到 ID: {qr_data}")
                     res = requests.post(GAS_URL, json={"id": qr_data, "key": input_key})
-                    if res.text == "Success":
+                    # 💡 優化 1：根據 GAS 回傳的訊息判斷是否成功
+                    if "報到成功" in res.text:
                         st.balloons()
-                        st.success("✅ 報到成功！")
+                        st.success(f"✅ {res.text}")
                         st.cache_data.clear()
                     else:
-                        st.error(f"報到失敗：{res.text}")
+                        st.error(f"報到結果：{res.text}")
                 else:
                     st.warning("⚠️ 無法偵測 QR Code。")
     else:
@@ -78,9 +76,8 @@ with tab1:
 with tab2:
     st.subheader("🔍 搜尋學員並報到")
     if is_authorized:
-        search_query = st.text_input("輸入姓名或單位搜尋", placeholder="例如：王小明")
+        search_query = st.text_input("輸入姓名、單位搜尋", placeholder="例如：王小明")
         if not df_all.empty:
-            # 確保搜尋時不分大小寫
             mask = df_all.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)
             filtered_df = df_all[mask] if search_query else pd.DataFrame()
             
@@ -89,34 +86,39 @@ with tab2:
                     col1, col2 = st.columns([3, 1])
                     user_uid = str(row.get("UID", ""))
                     user_name = row.get("姓名", "未知")
+                    user_org = row.get("單位", "")
+                    user_pos = row.get("職稱", "")
                     status = row.get("報到狀態", "")
                     
                     with col1:
-                        st.write(f"{'✅' if status == '已報到' else '❌'} **{user_name}** ({row.get('單位', '無')})")
+                        st.write(f"{'✅' if status == '已報到' else '❌'} **{user_org}{user_pos} {user_name}**")
                     with col2:
                         if status != "已報到":
                             if st.button("報到", key=f"btn_{user_uid}_{idx}"):
                                 res = requests.post(GAS_URL, json={"id": user_uid, "key": input_key})
-                                if res.text == "Success":
-                                    st.toast(f"✅ {user_name} 成功！")
+                                if "報到成功" in res.text:
+                                    st.toast(f"✅ {res.text}")
                                     st.cache_data.clear()
                                     st.rerun()
                                 else:
                                     st.error(res.text)
                     st.divider()
-            elif search_query:
-                st.write("查無資料。")
         else:
-            st.warning("目前名單為空，請確認 GAS 連結或試算表內容。")
+            st.warning("目前名單為空。")
     else:
         st.warning("🔒 請先於側邊欄輸入授權碼。")
 
 with tab3:
     st.subheader("📋 目前報到清單")
     if not df_all.empty:
-        st.dataframe(df_all, use_container_width=True)
+        # 💡 優化 2：簡化欄位顯示，只呈現指定的欄位
+        display_columns = ["單位", "職稱", "姓名", "連絡電話", "報到狀態"]
+        # 確保這些欄位在 DataFrame 中都存在，避免報錯
+        available_cols = [c for c in display_columns if c in df_all.columns]
+        
+        st.dataframe(df_all[available_cols], use_container_width=True)
         if st.button("🔄 重新整理"):
             st.cache_data.clear()
             st.rerun()
     else:
-        st.info("暫無資料或正在讀取中...")
+        st.info("暫無資料。")
